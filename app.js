@@ -40,7 +40,7 @@ const authenticationUser = async (request, response, next) => {
 
   jwt.verify(jwtToken, 'THE_SECRET', async (error, payload) => {
     if (error) {
-      //response.status(401)
+      response.status(401)
       response.send('Invalid JWT Token')
     } else {
       request.username = payload
@@ -63,10 +63,10 @@ app.post('/register/', async (request, response) => {
   const userAccount = await db.get(getUserAccount)
 
   if (userAccount !== undefined) {
-    response.status = 400
+    response.status(400)
     response.send('Username already exists')
   } else if (password.length < 6) {
-    response.status = 400
+    response.status(400)
     response.send('Password is too short')
   } else {
     const hiddenPassword = await bcrypt.hash(password, 10)
@@ -107,7 +107,7 @@ app.post('/login/', async (request, response) => {
   const userAccount = await db.get(getUserAccount)
   console.log(userAccount)
   if (userAccount === undefined) {
-    response.status = 400
+    response.status(400)
     response.send('Invalid user')
   } else {
     isCorrectPassword = await bcrypt.compare(password, userAccount.password)
@@ -117,7 +117,7 @@ app.post('/login/', async (request, response) => {
 
       response.send({jwtToken})
     } else {
-      response.status = 400
+      response.status(400)
       response.send('Invalid password')
     }
   }
@@ -135,6 +135,31 @@ app.get('/user/tweets/feed/', authenticationUser, async (request, response) => {
     username = ${username};`
 
   const userDetails = await db.get(getUserDetails)
+
+  const {user_id} = userDetails
+
+  const getLatestTweets = `
+  SELECT 
+    user.username, tweet.tweet, tweet.date_time AS dateTime 
+  FROM 
+    follower 
+  INNER JOIN 
+    tweet 
+  ON 
+    follower.following_user_id = tweet.user_id 
+  INNER JOIN
+    user 
+  ON 
+    tweet.user_id = user.user_id 
+  WHERE 
+    follower.follower_user_id = ${user_id} 
+  ORDER BY 
+    tweet.date_time DESC 
+  LIMIT 4;`
+
+  const latestTweets = await db.all(getLatestTweets)
+
+  response.send(latestTweets)
 })
 
 app.get('/user/following/', authenticationUser, async (request, response) => {
@@ -152,7 +177,116 @@ app.get('/user/following/', authenticationUser, async (request, response) => {
 
   const {user_id} = userDetails
 
-  console.log(user_id)
+  const getUserFollowing = `
+  SELECT 
+    user.username 
+  FROM 
+    user 
+  INNER JOIN 
+    follower 
+  ON 
+    user.user_id = follower.following_user_id 
+  WHERE 
+    follower.follower_user_id = ${user_id};`
+
+  const userFollowing = await db.all(getUserFollowing)
+
+  response.send(userFollowing)
+})
+
+app.get('/user/followers/', authenticationUser, async (request, response) => {
+  let {username} = request
+
+  const getUserDetails = `
+  SELECT 
+    * 
+  FROM 
+    user 
+  WHERE 
+    username = ${username};`
+
+  const userDetails = await db.get(getUserDetails)
+
+  const {user_id} = userDetails
+
+  const getUserFollower = `
+  SELECT 
+    user.username 
+  FROM 
+    user 
+  INNER JOIN 
+    follower 
+  ON 
+    user.user_id = follower.follower_user_id 
+  WHERE 
+    follower.following_user_id = ${user_id};`
+
+  const userFollower = await db.all(getUserFollower)
+
+  response.send(userFollower)
+})
+
+app.get('/tweets/:tweetId/', authenticationUser, async (request, response) => {
+  const {tweetId} = request.params
+
+  let {username} = request
+
+  const getUserDetails = `
+  SELECT 
+    * 
+  FROM 
+    user 
+  WHERE 
+    username = ${username};`
+
+  const userDetails = await db.get(getUserDetails)
+
+  const {user_id} = userDetails
+
+  const getUserFollowingTweetLikeReplay = `
+  SELECT 
+    tweet.tweet, 
+    count(like.like_id) AS likes,
+    count(reply.reply_id) AS replies,  
+    tweet.date_time AS dateTime 
+  FROM 
+    follower 
+      INNER JOIN 
+    tweet 
+      ON 
+        follower.following_user_id = tweet.user_id 
+      INNER JOIN 
+    user 
+      ON 
+        tweet.user_id = user.user_id 
+      INNER JOIN 
+    reply 
+      ON 
+        tweet.tweet_id = reply.tweet_id 
+      INNER JOIN 
+    like 
+      ON 
+        tweet.tweet_id = like.tweet_id 
+    WHERE 
+      follower.follower_user_id = ${user_id} 
+        AND 
+      tweet.tweet_id = ${tweetId} 
+    GROUP BY 
+      tweet.tweet_id;`
+
+  const userFollowingTweetLikeReplay = await db.all(
+    getUserFollowingTweetLikeReplay,
+  )
+  
+
+  if (userFollowingTweetLikeReplay === []) {
+    response.status(401)
+    response.send("Invalid request");
+  }
+  else {
+    response.send(userFollowingTweetLikeReplay)
+  }
+  
 })
 
 module.exports = app
